@@ -116,7 +116,11 @@ export class GifPlayerComponent {
   videoLoadStart$ = combineLatest([
     this.videoElement$,
     toObservable(this.playing),
-  ]);
+  ]).pipe(
+    switchMap(([element, playing]) =>
+      playing ? fromEvent(element, 'loadstart') : EMPTY
+    )
+  );;
 
   videoLoadComplete$ = this.videoElement$.pipe(
     switchMap((element) => fromEvent(element, 'loadeddata'))

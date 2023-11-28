@@ -36,7 +36,7 @@ export class RedditService {
   private fetchFromReddit(subreddit: string) {
     return this.http
       .get<RedditResponse>(
-        `https://www.reddit.com/r/${subreddit}/hot/.json?limit=25`
+        `https://www.reddit.com/r/${subreddit}/hot/.json?limit=100`
       )
       .pipe(
         catchError((err) => EMPTY),
