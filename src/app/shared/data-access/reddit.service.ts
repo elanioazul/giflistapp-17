@@ -1,8 +1,8 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
 import { Gif, RedditPost, RedditResponse } from '../interfaces';
-import { EMPTY, Subject, catchError, concatMap, debounceTime, distinctUntilChanged, map, of, startWith, switchMap } from 'rxjs';
+import { EMPTY, Subject, catchError, concatMap, debounceTime, distinctUntilChanged, expand, map, of, startWith, switchMap } from 'rxjs';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { FormControl } from '@angular/forms';
 
 export interface GifState {
@@ -16,6 +16,7 @@ export interface GifState {
 })
 export class RedditService {
   private http = inject(HttpClient);
+  private gifsPerPage = 20;
   subredditFormControl = new FormControl();
   //state
   private state = signal<GifState>({
@@ -33,6 +34,7 @@ export class RedditService {
 
   //sources
   pagination$ = new Subject<string | null>();
+  private error$ = new Subject<string | null>();
   private subredditChanged$ = this.subredditFormControl.valueChanges.pipe(
     debounceTime(300),
     distinctUntilChanged(),
@@ -43,9 +45,32 @@ export class RedditService {
     switchMap((subreddit) =>
       this.pagination$.pipe(
         startWith(null),
-        concatMap((lastKnownGif) =>
-          this.fetchFromReddit(subreddit, lastKnownGif, 20)
-        )
+        concatMap((lastKnownGif) => {
+          return this.fetchFromReddit(
+            subreddit,
+            lastKnownGif,
+            this.gifsPerPage,
+          ).pipe(
+            expand((response, index) => {
+              const {gifs, gifsRequired, lastKnownGif} = response;
+              const remainingGifsToFetch = gifsRequired - gifs.length;
+              const maxAttempts = 15;
+
+              const shouldKeepTrying = 
+                remainingGifsToFetch > 0 &&
+                index < maxAttempts &&
+                lastKnownGif !== null;
+
+              return shouldKeepTrying
+                ? this.fetchFromReddit(
+                  subreddit,
+                  lastKnownGif,
+                  remainingGifsToFetch
+                )
+                : EMPTY;
+            })
+          )
+        })
       )
     )
   );
@@ -69,6 +94,13 @@ export class RedditService {
         lastKnownGif: null
       }))
     })
+
+    this.error$.pipe(takeUntilDestroyed()).subscribe((error) =>
+    this.state.update((state) => ({
+      ...state,
+      error,
+    }))
+  );
   }
 
   private fetchFromReddit(
@@ -82,15 +114,25 @@ export class RedditService {
         (after ? `&after=${after}` : '')
       )
       .pipe(
-        catchError((err) => EMPTY),
+        catchError((err) => {
+          this.handleError(err);
+          return EMPTY
+        }),
         map((response) => {
           const posts = response.data.children;
-          const lastKnownGif = posts.length
+          let gifs = this.convertRedditPostsToGifs(posts);
+          let lastKnownGif = posts.length
             ? posts[posts.length - 1].data.name
             : null;
 
+          if (posts.length > gifsRequired) {
+            // too many, trim
+            gifs = gifs.slice(0, gifsRequired - gifs.length);
+            lastKnownGif = gifs[gifs.length - 1]?.name ?? null;
+          }
+
           return {
-            gifs : this.convertRedditPostsToGifs(posts),
+            gifs,
             gifsRequired,
             lastKnownGif
           }
@@ -152,5 +194,16 @@ export class RedditService {
 
     // No useable formats available
     return null;
+  }
+
+  private handleError(err: HttpErrorResponse) {
+    // Handle specific error cases
+    if (err.status === 404 && err.url) {
+      this.error$.next(`Failed to load gifs for /r/${err.url.split('/')[4]}`);
+      return;
+    }
+
+    // Generic error if no cases match
+    this.error$.next(err.statusText);
   }
 }
