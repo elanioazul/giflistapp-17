@@ -1,10 +1,23 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
 import { Gif, RedditPost, RedditResponse } from '../interfaces';
-import { EMPTY, Subject, catchError, concatMap, debounceTime, distinctUntilChanged, expand, map, of, startWith, switchMap } from 'rxjs';
+import {
+  EMPTY,
+  Subject,
+  catchError,
+  concatMap,
+  debounceTime,
+  distinctUntilChanged,
+  expand,
+  map,
+  merge,
+  of,
+  startWith,
+  switchMap,
+} from 'rxjs';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { FormControl } from '@angular/forms';
-
+import { connect } from 'ngxtension/connect';
 export interface GifState {
   gifs: Gif[];
   error: string | null;
@@ -49,27 +62,27 @@ export class RedditService {
           return this.fetchFromReddit(
             subreddit,
             lastKnownGif,
-            this.gifsPerPage,
+            this.gifsPerPage
           ).pipe(
             expand((response, index) => {
-              const {gifs, gifsRequired, lastKnownGif} = response;
+              const { gifs, gifsRequired, lastKnownGif } = response;
               const remainingGifsToFetch = gifsRequired - gifs.length;
               const maxAttempts = 15;
 
-              const shouldKeepTrying = 
+              const shouldKeepTrying =
                 remainingGifsToFetch > 0 &&
                 index < maxAttempts &&
                 lastKnownGif !== null;
 
               return shouldKeepTrying
                 ? this.fetchFromReddit(
-                  subreddit,
-                  lastKnownGif,
-                  remainingGifsToFetch
-                )
+                    subreddit,
+                    lastKnownGif,
+                    remainingGifsToFetch
+                  )
                 : EMPTY;
             })
-          )
+          );
         })
       )
     )
@@ -77,30 +90,49 @@ export class RedditService {
 
   constructor() {
     //reducers
-    this.gifsLoaded$.pipe(takeUntilDestroyed()).subscribe((response) =>
-      this.state.update((state) => ({
-        ...state,
-        gifs: [...state.gifs, ...response.gifs],
-        loading: false,
-        lastKnownGif: response.lastKnownGif
-      }))
+    const nextState$ = merge(
+      this.subredditChanged$.pipe(
+        map(() => ({
+          loading: true,
+          gifs: [],
+          lastKnownGif: null,
+        }))
+      ),
+      this.error$.pipe(map((error) => ({ error })))
     );
 
-    this.subredditChanged$.pipe(takeUntilDestroyed()).subscribe(() => {
-      this.state.update((state) => ({
-        ...state,
-        loading: true,
-        gifs: [],
-        lastKnownGif: null
-      }))
-    })
+    connect(this.state)
+      .with(nextState$)
+      .with(this.gifsLoaded$, (state, response) => ({
+        gifs: [...state.gifs, ...response.gifs],
+        loading: false,
+        lastKnownGif: response.lastKnownGif,
+      }));
 
-    this.error$.pipe(takeUntilDestroyed()).subscribe((error) =>
-    this.state.update((state) => ({
-      ...state,
-      error,
-    }))
-  );
+    // this.gifsLoaded$.pipe(takeUntilDestroyed()).subscribe((response) =>
+    //   this.state.update((state) => ({
+    //     ...state,
+    //     gifs: [...state.gifs, ...response.gifs],
+    //     loading: false,
+    //     lastKnownGif: response.lastKnownGif,
+    //   }))
+    // );
+
+    // this.subredditChanged$.pipe(takeUntilDestroyed()).subscribe(() => {
+    //   this.state.update((state) => ({
+    //     ...state,
+    //     loading: true,
+    //     gifs: [],
+    //     lastKnownGif: null,
+    //   }));
+    // });
+
+    // this.error$.pipe(takeUntilDestroyed()).subscribe((error) =>
+    //   this.state.update((state) => ({
+    //     ...state,
+    //     error,
+    //   }))
+    // );
   }
 
   private fetchFromReddit(
@@ -111,12 +143,12 @@ export class RedditService {
     return this.http
       .get<RedditResponse>(
         `https://www.reddit.com/r/${subreddit}/hot/.json?limit=100` +
-        (after ? `&after=${after}` : '')
+          (after ? `&after=${after}` : '')
       )
       .pipe(
         catchError((err) => {
           this.handleError(err);
-          return EMPTY
+          return EMPTY;
         }),
         map((response) => {
           const posts = response.data.children;
@@ -134,8 +166,8 @@ export class RedditService {
           return {
             gifs,
             gifsRequired,
-            lastKnownGif
-          }
+            lastKnownGif,
+          };
         })
       );
   }

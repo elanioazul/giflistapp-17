@@ -15,10 +15,12 @@ import {
   combineLatest,
   filter,
   fromEvent,
+  map,
+  merge,
   switchMap,
 } from 'rxjs';
 import { NgStyle } from '@angular/common';
-
+import { connect } from 'ngxtension/connect';
 interface GifPlayerState {
   playing: boolean;
   status: 'initial' | 'loading' | 'loaded';
@@ -128,23 +130,32 @@ export class GifPlayerComponent {
 
   constructor() {
     //reducers
-    this.videoLoadStart$
-      .pipe(takeUntilDestroyed())
-      .subscribe(() =>
-        this.state.update((state) => ({ ...state, status: 'loading' }))
-      );
+    const nextState$ = merge(
+      this.videoLoadStart$.pipe(map(() => ({ status: 'loading' as const }))),
+      this.videoLoadComplete$.pipe(map(() => ({ status: 'loaded' as const })))
+    );
 
-    this.videoLoadComplete$
-      .pipe(takeUntilDestroyed())
-      .subscribe(() =>
-        this.state.update((state) => ({ ...state, status: 'loaded' }))
-      );
+    connect(this.state)
+    .with(nextState$)
+    .with(this.togglePlay$, (state) => ({ playing: !state.playing }));
 
-    this.togglePlay$
-      .pipe(takeUntilDestroyed())
-      .subscribe(() =>
-        this.state.update((state) => ({ ...state, playing: !state.playing }))
-      );
+    // this.videoLoadStart$
+    //   .pipe(takeUntilDestroyed())
+    //   .subscribe(() =>
+    //     this.state.update((state) => ({ ...state, status: 'loading' }))
+    //   );
+
+    // this.videoLoadComplete$
+    //   .pipe(takeUntilDestroyed())
+    //   .subscribe(() =>
+    //     this.state.update((state) => ({ ...state, status: 'loaded' }))
+    //   );
+
+    // this.togglePlay$
+    //   .pipe(takeUntilDestroyed())
+    //   .subscribe(() =>
+    //     this.state.update((state) => ({ ...state, playing: !state.playing }))
+    //   );
 
     // effects
     effect(() => {
